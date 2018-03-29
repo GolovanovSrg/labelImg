@@ -24,6 +24,7 @@ class LabelDialog(QDialog):
         model = QStringListModel()
         model.setStringList(listItem)
         completer = QCompleter()
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setModel(model)
         self.edit.setCompleter(completer)
 
@@ -38,12 +39,13 @@ class LabelDialog(QDialog):
 
         if listItem is not None and len(listItem) > 0:
             self.listWidget = QListWidget(self)
-            for item in listItem:
-                self.listWidget.addItem(item)
+            self.listWidget.addItems(listItem)
             self.listWidget.itemDoubleClicked.connect(self.listItemClick)
             layout.addWidget(self.listWidget)
 
         self.setLayout(layout)
+
+        self.setMinimumWidth(600)
 
     def validate(self):
         try:

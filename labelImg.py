@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 import codecs
 import os.path
-import re
+import json
 import sys
 import subprocess
+
 
 from functools import partial
 from collections import defaultdict
@@ -40,6 +41,8 @@ from libs.pascal_voc_io import PascalVocReader
 from libs.pascal_voc_io import XML_EXT
 from libs.yolo_io import YoloReader
 from libs.yolo_io import TXT_EXT
+from libs.neuromation_io import NeuromationReader
+from libs.neuromation_io import JSON_EXT
 from libs.ustr import ustr
 from libs.version import __version__
 
@@ -100,11 +103,14 @@ class MainWindow(QMainWindow, WindowMixin):
         self.defaultSaveDir = None
         self.usingPascalVocFormat = True
         self.usingYoloFormat = False
+        self.usingNeuromationFormat = False
 
         # For loading all image under a directory
         self.mImgList = []
         self.dirname = None
         self.labelHist = []
+        self.label_to_id = {}
+        self.id_to_label = {}
         self.lastOpenDir = None
 
         # Whether we need to save or not.
@@ -478,16 +484,29 @@ class MainWindow(QMainWindow, WindowMixin):
             self.actions.save_format.setIcon(newIcon("format_voc"))
             self.usingPascalVocFormat = True
             self.usingYoloFormat = False
+            self.usingNeuromationFormat = False
 
         elif save_format == 'YOLO':
             self.actions.save_format.setText("YOLO")
             self.actions.save_format.setIcon(newIcon("format_yolo"))
             self.usingPascalVocFormat = False
             self.usingYoloFormat = True
+            self.usingNeuromationFormat = False
+
+        elif save_format == 'Neuromation':
+            self.actions.save_format.setText("Neuromation")
+            self.actions.save_format.setIcon(newIcon("format_voc"))
+            self.usingPascalVocFormat = False
+            self.usingYoloFormat = False
+            self.usingNeuromationFormat = True
 
     def change_format(self):
-        if self.usingPascalVocFormat: self.set_format("YOLO")
-        elif self.usingYoloFormat: self.set_format("PascalVOC")
+        if self.usingPascalVocFormat:
+            self.set_format("YOLO")
+        elif self.usingYoloFormat:
+            self.set_format("Neuromation")
+        elif self.usingNeuromationFormat:
+            self.set_format("PascalVOC")
 
     def noShapes(self):
         return not self.itemsToShapes
@@ -643,6 +662,11 @@ class MainWindow(QMainWindow, WindowMixin):
             item.setBackground(generateColorByText(text))
             self.setDirty()
 
+            if text not in self.labelHist:
+                self.labelHist.append(text)
+                self.label_to_id[text] = text
+                self.id_to_label[text] = text
+
     # Tzutalin 20160906 : Add file list and dock to move faster
     def fileitemDoubleClicked(self, item=None):
         currIndex = self.mImgList.index(ustr(item.text()))
@@ -755,16 +779,21 @@ class MainWindow(QMainWindow, WindowMixin):
         shapes = [format_shape(shape) for shape in self.canvas.shapes]
         # Can add differrent annotation formats here
         try:
-            if self.usingPascalVocFormat is True:
+            if self.usingPascalVocFormat:
                 annotationFilePath += XML_EXT
                 print ('Img: ' + self.filePath + ' -> Its xml: ' + annotationFilePath)
                 self.labelFile.savePascalVocFormat(annotationFilePath, shapes, self.filePath, self.imageData,
                                                    self.lineColor.getRgb(), self.fillColor.getRgb())
-            elif self.usingYoloFormat is True:
+            elif self.usingYoloFormat:
                 annotationFilePath += TXT_EXT
                 print ('Img: ' + self.filePath + ' -> Its txt: ' + annotationFilePath)
                 self.labelFile.saveYoloFormat(annotationFilePath, shapes, self.filePath, self.imageData, self.labelHist,
                                                    self.lineColor.getRgb(), self.fillColor.getRgb())
+            elif self.usingNeuromationFormat:
+                annotationFilePath += JSON_EXT
+                print('Img: ' + self.filePath + ' -> Its txt: ' + annotationFilePath)
+                self.labelFile.saveNeuromationFormat(annotationFilePath, shapes, self.filePath, self.label_to_id)
+
             else:
                 self.labelFile.save(annotationFilePath, shapes, self.filePath, self.imageData,
                                     self.lineColor.getRgb(), self.fillColor.getRgb())
@@ -833,6 +862,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
             if text not in self.labelHist:
                 self.labelHist.append(text)
+                self.label_to_id[text] = text
+                self.id_to_label[text] = text
         else:
             # self.canvas.undoLastLine()
             self.canvas.resetAllLines()
@@ -983,6 +1014,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     os.path.splitext(self.filePath)[0])
                 xmlPath = os.path.join(self.defaultSaveDir, basename + XML_EXT)
                 txtPath = os.path.join(self.defaultSaveDir, basename + TXT_EXT)
+                jsonPath = os.path.join(self.defaultSaveDir, basename + JSON_EXT)
 
                 """Annotation file priority:
                 PascalXML > YOLO
@@ -991,13 +1023,18 @@ class MainWindow(QMainWindow, WindowMixin):
                     self.loadPascalXMLByFilename(xmlPath)
                 elif os.path.isfile(txtPath):
                     self.loadYOLOTXTByFilename(txtPath)
+                elif os.path.isfile(jsonPath):
+                    self.loadNeuromationJSONByFilename(jsonPath)
             else:
                 xmlPath = os.path.splitext(filePath)[0] + XML_EXT
                 txtPath = os.path.splitext(filePath)[0] + TXT_EXT
+                jsonPath = os.path.splitext(filePath)[0] + JSON_EXT
                 if os.path.isfile(xmlPath):
                     self.loadPascalXMLByFilename(xmlPath)
                 elif os.path.isfile(txtPath):
                     self.loadYOLOTXTByFilename(txtPath)
+                elif os.path.isfile(jsonPath):
+                    self.loadNeuromationJSONByFilename(jsonPath)
 
             self.setWindowTitle(__appname__ + ' ' + filePath)
 
@@ -1345,14 +1382,30 @@ class MainWindow(QMainWindow, WindowMixin):
         self.setDirty()
 
     def loadPredefinedClasses(self, predefClassesFile):
-        if os.path.exists(predefClassesFile) is True:
-            with codecs.open(predefClassesFile, 'r', 'utf8') as f:
-                for line in f:
-                    line = line.strip()
-                    if self.labelHist is None:
-                        self.labelHist = [line]
+        if os.path.exists(predefClassesFile):
+            with codecs.open(predefClassesFile, 'r', 'utf-8') as f:
+                data = json.load(f)
+
+                for item in data:
+                    if isinstance(item, str):
+                        self.labelHist.append(item)
+
+                        if item not in self.label_to_id:
+                            self.label_to_id[item] = item
+                            self.id_to_label[item] = item
+                        else:
+                            assert False, "Class names must be unique"
+
+                    elif isinstance(item, tuple) or isinstance(item, list) and len(item) == 2:
+                        self.labelHist.append(item[1])
+
+                        if item[1] not in self.label_to_id:
+                            self.label_to_id[item[1]] = item[0]
+                            self.id_to_label[item[0]] = item[1]
+                        else:
+                            assert False, "Class names must be unique: '{}' already exists".format(item[1])
                     else:
-                        self.labelHist.append(line)
+                        assert False, "Wrong format of predefined classes file"
 
     def loadPascalXMLByFilename(self, xmlPath):
         if self.filePath is None:
@@ -1379,6 +1432,19 @@ class MainWindow(QMainWindow, WindowMixin):
         print (shapes)
         self.loadLabels(shapes)
         self.canvas.verified = tYoloParseReader.verified
+
+    def loadNeuromationJSONByFilename(self, jsonPath):
+        if self.filePath is None:
+            return
+        if os.path.isfile(jsonPath) is False:
+            return
+
+        self.set_format("Neuromation")
+        tNeuromationParseReader = NeuromationReader(jsonPath, self.image, self.label_to_id, self.id_to_label)
+        shapes = tNeuromationParseReader.getShapes()
+        print (shapes)
+        self.loadLabels(shapes)
+        self.canvas.verified = tNeuromationParseReader.verified
 
 
 
@@ -1407,7 +1473,7 @@ def get_main_app(argv=[]):
     win = MainWindow(argv[1] if len(argv) >= 2 else None,
                      argv[2] if len(argv) >= 3 else os.path.join(
                          os.path.dirname(sys.argv[0]),
-                         'data', 'predefined_classes.txt'))
+                         'data', 'predefined_classes.json'))
     win.show()
     return app, win
 

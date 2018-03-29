@@ -9,6 +9,7 @@ except ImportError:
 from base64 import b64encode, b64decode
 from libs.pascal_voc_io import PascalVocWriter
 from libs.yolo_io import YOLOWriter
+from libs.neuromation_io import NeuromationWriter
 from libs.pascal_voc_io import XML_EXT
 import os.path
 import sys
@@ -82,6 +83,24 @@ class LabelFile(object):
 
         writer.save(targetFile=filename, classList=classList)
         return
+
+    def saveNeuromationFormat(self, filename, shapes, imagePath, label_to_id):
+        imgFolderPath = os.path.dirname(imagePath)
+        imgFolderName = os.path.split(imgFolderPath)[-1]
+        imgFileName = os.path.basename(imagePath)
+
+        writer = NeuromationWriter(imgFolderName, imgFileName)
+        writer.verified = self.verified
+
+        for shape in shapes:
+            points = shape['points']
+            label = shape['label']
+            # Add Chris
+            difficult = int(shape['difficult'])
+            bndbox = LabelFile.convertPoints2BndBox(points)
+            writer.addBndBox(bndbox[0], bndbox[1], bndbox[2], bndbox[3], label, difficult)
+
+        writer.save(label_to_id, targetFile=filename)
 
     def toggleVerify(self):
         self.verified = not self.verified

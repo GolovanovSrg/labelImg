@@ -101,7 +101,7 @@ class YoloReader:
 
         self.imgSize = imgSize
 
-        self.verified = False
+        self.verified = True
         # try:
         self.parseYoloFormat()
         # except:
